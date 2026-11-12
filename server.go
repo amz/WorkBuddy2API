@@ -41,7 +41,18 @@ func (s *Server) Handler() http.Handler {
 	if s.limiter != nil {
 		h = s.limiter.middleware(h)
 	}
-	return h
+	return noSniff(h)
+}
+
+// noSniff sets X-Content-Type-Options on every response, including auth-denied
+// and rate-limited ones. The proxy only serves JSON/SSE, but declaring nosniff
+// is cheap defense-in-depth against a browser being tricked into sniffing a
+// response as HTML.
+func noSniff(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // requireAPIKey enforces bearer-token auth on the /v1/ route space when a key
