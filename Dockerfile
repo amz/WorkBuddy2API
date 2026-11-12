@@ -24,6 +24,10 @@ COPY --from=build /out/workbuddy2api /usr/local/bin/workbuddy2api
 ENV HOME=/auth
 EXPOSE 61021
 
+# gcr.io/distroless/static-debian12:nonroot already defaults to uid/gid 65532.
+# Declare it explicitly for scanners (CKV_DOCKER_3) and k8s runAsNonRoot admission.
+USER 65532:65532
+
 # No default command: `docker run -it <image>` opens the interactive login
 # menu, and the server is started explicitly with `--headless`.
 ENTRYPOINT ["/usr/local/bin/workbuddy2api"]
