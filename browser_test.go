@@ -49,3 +49,18 @@ func TestIsSafeLoginURL_AcceptsShellMetacharactersInHTTPSURL(t *testing.T) {
 		}
 	}
 }
+
+// Scheme matching must not depend on how the upstream spells the scheme.
+// net/url.Parse lowercases the scheme, so HTTPS:// and Https:// parse to
+// "https" and are accepted — a mixed-case login URL still opens the browser.
+func TestIsSafeLoginURL_AcceptsMixedCaseScheme(t *testing.T) {
+	for _, raw := range []string{
+		"HTTPS://www.workbuddy.ai/login?platform=workbuddy-ai&state=abc",
+		"Https://www.workbuddy.ai/login",
+		"HtTpS://x/y",
+	} {
+		if !isSafeLoginURL(raw) {
+			t.Errorf("rejected valid login URL with mixed-case scheme %q", raw)
+		}
+	}
+}
