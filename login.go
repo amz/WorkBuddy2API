@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 )
@@ -200,11 +201,25 @@ func saveCredentials(path, uid string, tok *authTokenResponse) error {
 	return os.WriteFile(path, raw, 0600)
 }
 
-func openBrowser(url string) {
+// isSafeLoginURL reports whether raw is an https URL with a host. The login
+// URL comes from the TLS-pinned upstream, but the OS openers accept arbitrary
+// schemes and local paths, so validate before handing it to exec.Command.
+// Only https is allowed; a valid https URL never starts with '-', which also
+// prevents macOS `open` from interpreting it as an option.
+func isSafeLoginURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && u.Scheme == "https" && u.Host != ""
+}
+
+func openBrowser(rawURL string) {
+	if !isSafeLoginURL(rawURL) {
+		fmt.Fprintln(os.Stderr, "(refusing to open unsafe login URL; copy it manually)")
+		return
+	}
 	for _, cmd := range [][]string{
-		{"rundll32", "url.dll,FileProtocolHandler", url}, // Windows
-		{"open", url},                                    // macOS
-		{"xdg-open", url},                                // Linux
+		{"rundll32", "url.dll,FileProtocolHandler", rawURL}, // Windows
+		{"open", rawURL},                                     // macOS
+		{"xdg-open", rawURL},                                 // Linux
 	} {
 		if err := startCmd(cmd[0], cmd[1:]...); err == nil {
 			return
