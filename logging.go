@@ -181,27 +181,18 @@ func finishReasonFromLine(line, current string) string {
 // one SSE data line. Only non-empty reasons are returned: intermediate chunks
 // from the gateway carry an empty string, which is not a terminal marker.
 func choiceFinishReasons(line string) map[int]string {
-	line = strings.TrimSpace(line)
-	if !strings.HasPrefix(line, "data:") {
+	data, ok := sseData(line)
+	if !ok || data == "[DONE]" {
 		return nil
 	}
-	data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-	if data == "[DONE]" {
-		return nil
-	}
-	var c struct {
-		Choices []struct {
-			Index        int     `json:"index"`
-			FinishReason *string `json:"finish_reason"`
-		} `json:"choices"`
-	}
-	if json.Unmarshal([]byte(data), &c) != nil {
+	c, ok := scanChunkData(data)
+	if !ok {
 		return nil
 	}
 	out := make(map[int]string)
-	for _, ch := range c.Choices {
-		if ch.FinishReason != nil && *ch.FinishReason != "" {
-			out[ch.Index] = *ch.FinishReason
+	for _, ch := range c.choices {
+		if ch.finish != "" {
+			out[ch.index] = ch.finish
 		}
 	}
 	return out

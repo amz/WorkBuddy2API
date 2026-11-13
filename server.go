@@ -28,7 +28,7 @@ func NewServer(client *UpstreamClient, am *AuthManager, apiKey string, desensiti
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/models", s.handleModels)
-	mux.HandleFunc("/v1/models/", s.handleModels)   // catches /v1/models/<id>
+	mux.HandleFunc("/v1/models/", s.handleModels) // catches /v1/models/<id>
 	mux.HandleFunc("/v1/chat/completions", s.handleChat)
 	mux.HandleFunc("/v1/messages", s.handleAnthropic)
 	mux.HandleFunc("/healthz", s.handleHealth)
@@ -122,15 +122,15 @@ type modelObject struct {
 
 func toModelObject(m CachedModel, now int64) modelObject {
 	return modelObject{
-		ID:                m.ID,
-		Object:            "model",
-		Created:           now,
-		OwnedBy:           "workbuddy",
-		Name:              m.Name,
-		Description:       m.Description,
-		Vendor:            m.Vendor,
-		MaxInputTokens:    m.MaxInputTokens,
-		MaxOutputTokens:   m.MaxOutputTokens,
+		ID:                 m.ID,
+		Object:             "model",
+		Created:            now,
+		OwnedBy:            "workbuddy",
+		Name:               m.Name,
+		Description:        m.Description,
+		Vendor:             m.Vendor,
+		MaxInputTokens:     m.MaxInputTokens,
+		MaxOutputTokens:    m.MaxOutputTokens,
 		SupportsImages:     m.SupportsImages,
 		SupportsToolCall:   m.SupportsToolCall,
 		SupportsReasoning:  m.SupportsReasoning,
@@ -492,57 +492,31 @@ func isDoneLine(line string) bool {
 
 // normalizeIntermediateFinishReason rewrites the non-standard
 // `"finish_reason": ""` that the upstream gateway puts on every intermediate
-// chunk to `null`, which is what the OpenAI schema specifies. Parsing the line
-// as JSON (rather than replacing substrings) avoids corrupting chunk content
-// that happens to contain the same text, and covers any JSON whitespace layout.
+// chunk to `null`, which is what the OpenAI schema specifies. Scan direct
+// choice fields and replace only their value spans, preserving all other bytes.
 func normalizeIntermediateFinishReason(line string) string {
 	data, ok := sseData(line)
 	if !ok || data == "[DONE]" || !strings.Contains(data, `"finish_reason"`) {
 		return line
 	}
-	var chunk struct {
-		Choices []struct {
-			FinishReason json.RawMessage `json:"finish_reason"`
-		} `json:"choices"`
-	}
-	if json.Unmarshal([]byte(data), &chunk) != nil {
+	chunk, ok := scanChunkData(data)
+	if !ok {
 		return line
 	}
-	changed := false
-	for i := range chunk.Choices {
-		if string(chunk.Choices[i].FinishReason) == `""` {
-			chunk.Choices[i].FinishReason = json.RawMessage(`null`)
-			changed = true
+	var fixed strings.Builder
+	last := 0
+	for _, ch := range chunk.choices {
+		if span := ch.emptyFRSpan; span[0] >= 0 {
+			fixed.WriteString(data[last:span[0]])
+			fixed.WriteString("null")
+			last = span[1]
 		}
 	}
-	if !changed {
+	if last == 0 {
 		return line
 	}
-	// Decode into a generic map so unknown upstream fields survive, then
-	// replace only the finish_reason values.
-	var generic map[string]json.RawMessage
-	if json.Unmarshal([]byte(data), &generic) != nil {
-		return line
-	}
-	var choices []map[string]json.RawMessage
-	if json.Unmarshal(generic["choices"], &choices) != nil {
-		return line
-	}
-	for i := range choices {
-		if string(choices[i]["finish_reason"]) == `""` {
-			choices[i]["finish_reason"] = json.RawMessage(`null`)
-		}
-	}
-	normalizedChoices, err := json.Marshal(choices)
-	if err != nil {
-		return line
-	}
-	generic["choices"] = normalizedChoices
-	payload, err := json.Marshal(generic)
-	if err != nil {
-		return line
-	}
-	return "data: " + string(payload)
+	fixed.WriteString(data[last:])
+	return "data: " + fixed.String()
 }
 
 // sseChunkMeta carries the identity of the upstream completion so a synthesized
@@ -557,18 +531,15 @@ func chunkMetaFromLine(line string, meta sseChunkMeta) sseChunkMeta {
 	if !ok || data == "[DONE]" {
 		return meta
 	}
-	var c struct {
-		ID    string `json:"id"`
-		Model string `json:"model"`
-	}
-	if json.Unmarshal([]byte(data), &c) != nil {
+	c, ok := scanChunkData(data)
+	if !ok {
 		return meta
 	}
-	if c.ID != "" {
-		meta.id = c.ID
+	if c.id != "" {
+		meta.id = c.id
 	}
-	if c.Model != "" {
-		meta.model = c.Model
+	if c.model != "" {
+		meta.model = c.model
 	}
 	return meta
 }
@@ -725,17 +696,13 @@ func choiceIndexes(line string) map[int]bool {
 	if !ok || data == "[DONE]" {
 		return nil
 	}
-	var c struct {
-		Choices []struct {
-			Index int `json:"index"`
-		} `json:"choices"`
-	}
-	if json.Unmarshal([]byte(data), &c) != nil {
+	c, ok := scanChunkData(data)
+	if !ok {
 		return nil
 	}
-	out := make(map[int]bool, len(c.Choices))
-	for _, ch := range c.Choices {
-		out[ch.Index] = true
+	out := make(map[int]bool, len(c.choices))
+	for _, ch := range c.choices {
+		out[ch.index] = true
 	}
 	return out
 }
