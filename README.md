@@ -32,7 +32,7 @@ The desktop app does **not** need to be running.
 
 ## Quick start
 
-1. Download `WorkBuddy2API.exe` from the [latest release](https://github.com/amz/WorkBuddy2API/releases/latest).
+1. Download `WorkBuddy2API-windows-amd64.exe` from the [latest release](https://github.com/amz/WorkBuddy2API/releases/latest).
 2. Run it. On first launch it opens your browser to sign in to WorkBuddy.
 3. Pick **Start server** from the menu.
 
