@@ -5,6 +5,7 @@
 **OpenAI-compatible proxy for WorkBuddy AI — run WorkBuddy's models through any OpenAI client, without the desktop app open.**
 
 [![CI](https://github.com/ErfanBagheri404/WorkBuddy2API/actions/workflows/ci.yml/badge.svg)](https://github.com/ErfanBagheri404/WorkBuddy2API/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-measured%20in%20CI-blue?logo=go)](https://github.com/amz/WorkBuddy2API/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/ErfanBagheri404/WorkBuddy2API?color=blue)](https://github.com/ErfanBagheri404/WorkBuddy2API/releases/latest)
 [![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)

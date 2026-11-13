@@ -292,7 +292,7 @@ Insert it into the badge block after the CI badge (line 7), before the Release b
 - [ ] **Step 3: Verify the URL**
 
 Run: `grep -n 'coverage\|ErfanBagheri404' README.md`
-Expected: exactly one new coverage badge line, containing `amz/WorkBuddy2API` and no `ErfanBagheri404` on that line; the three pre-existing upstream badges still present.
+Expected: exactly one new coverage badge line, containing `amz/WorkBuddy2API` and no `ErfanBagheri404` on that line; the badge block (lines 7–11) has 5 badges and the 2 upstream-URL badges (CI, Release) are byte-identical to `main`. Note: `grep -c 'ErfanBagheri404' README.md` returns **4**, not 3 — 2 badges plus 2 body links (release download line 35, clone line 199); do not assert on a repo-wide count.
 
 - [ ] **Step 4: Commit**
 
