@@ -33,6 +33,9 @@ func scanChunkData(data string) (sseChunkScan, bool) {
 			return p.text(&out.model)
 		case "choices":
 			out.choices = nil
+			if p.null() {
+				return true
+			}
 			return p.array(func() bool {
 				ch := sseChoiceScan{emptyFRSpan: [2]int{-1, -1}}
 				if !p.null() && !p.object(func(key string) bool {

@@ -38,6 +38,8 @@ func TestScanChunkData_JSONReference(t *testing.T) {
 		`{"delta":{"id":"wrong","model":"wrong","choices":[{"index":8}]},"choices":[{"delta":{"finish_reason":"stop","index":99}}]}`,
 		`{"choices":[{"index":0}],"choices":[{"index":3,"finish_reason":"stop"}]}`,
 		`{"choices":[{"index":null,"finish_reason":null}]}`,
+		`{"id":"meta-only","model":"upstream-model","choices":null}`,
+		`{"choices":[{"index":3,"finish_reason":"stop"}],"choices":null}`,
 		`{"other":[true,false,null,-1.25e+2,{"key":"escaped\\\"text"}]}`,
 		`{"id":42}`, `{"model":[]}`, `{"choices":{}}`,
 		`{"choices":[{"index":"1"}]}`, `{"choices":[{"index":1.5}]}`,
@@ -86,10 +88,6 @@ func TestScanChunkData_AcceptedDivergences(t *testing.T) {
 		if !ok || got.id != "ok" || len(got.choices) != 0 {
 			t.Fatalf("scan(%q) = %+v, %v", data, got, ok)
 		}
-	}
-	// Unlike encoding/json's struct decoder, the spec requires an array.
-	if _, ok := scanChunkData(`{"choices":null}`); ok {
-		t.Fatal("null choices accepted")
 	}
 	got, ok := scanChunkData(`{"choices":[{"finish_reason":""}]}`)
 	if !ok || !reflect.DeepEqual(got.choices[0].emptyFRSpan, [2]int{29, 31}) {
