@@ -229,27 +229,36 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "read body: "+err.Error(), "invalid_request_error")
 		return
 	}
-	var probe struct {
-		Model    string `json:"model"`
-		Stream   *bool  `json:"stream"`
-		Messages []any  `json:"messages"`
-	}
-	if err := json.Unmarshal(body, &probe); err != nil {
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
 		writeError(w, http.StatusBadRequest, "request body must be valid JSON", "invalid_request_error")
 		return
 	}
-	if strings.TrimSpace(probe.Model) == "" {
+	// Validation reads the already-decoded map; the body is decoded once.
+	if m, _ := payload["model"].(string); strings.TrimSpace(m) == "" {
 		writeError(w, http.StatusBadRequest, "model is required", "invalid_request_error")
 		return
 	}
-	if len(probe.Messages) == 0 {
+	msgs, _ := payload["messages"].([]any)
+	if len(msgs) == 0 {
 		writeError(w, http.StatusBadRequest, "messages must not be empty", "invalid_request_error")
 		return
+	}
+	// A wrong-typed stream must still 400 the way the old struct decode did:
+	// map decoding alone would silently ignore the type error.
+	if v, ok := payload["stream"]; ok {
+		if _, isBool := v.(bool); !isBool {
+			writeError(w, http.StatusBadRequest, "request body must be valid JSON", "invalid_request_error")
+			return
+		}
 	}
 	// WorkBuddy only supports streaming. Always request stream from upstream.
 	// When the client wants non-streaming, buffer the SSE chunks and return
 	// a single assembled JSON response.
-	clientWantsStream := probe.Stream == nil || *probe.Stream
+	clientWantsStream := true
+	if v, ok := payload["stream"].(bool); ok {
+		clientWantsStream = v
+	}
 
 	cid := newCorrelationID()
 	started := time.Now()
@@ -258,8 +267,6 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		reqModel, clientWantsStream, msgCount, lastUser)
 	logBlock(cid, "REQUEST BODY", string(body))
 
-	var payload map[string]any
-	_ = json.Unmarshal(body, &payload)
 	payload["stream"] = true
 
 	// Desensitize mode: rewrite moderation-triggering keywords in the system
@@ -280,9 +287,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	body, _ = json.Marshal(payload)
-
-	resp, am, err := s.client.Chat(r.Context(), body)
+	resp, am, err := s.client.Chat(r.Context(), payload)
 	if err != nil {
 		logLine(cid, "✗ UPSTREAM ERROR %s | %s", reqModel, err)
 		writeError(w, http.StatusBadGateway, "upstream: "+err.Error(), "server_error")
@@ -809,14 +814,12 @@ func (s *Server) handleAnthropic(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	openaiBody, _ := json.Marshal(payload)
-
 	cid := newCorrelationID()
 	started := time.Now()
 	logLine(cid, "▶ ANTHROPIC %s | max_tokens=%d | stream=%v",
 		ar.Model, ar.MaxTokens, ar.Stream == nil || *ar.Stream)
 
-	resp, am, err := s.client.Chat(r.Context(), openaiBody)
+	resp, am, err := s.client.Chat(r.Context(), payload)
 	if err != nil {
 		logLine(cid, "✗ UPSTREAM ERROR %s | %s", ar.Model, err)
 		writeAnthropicError(w, http.StatusBadGateway, "upstream: "+err.Error(), "api_error")
