@@ -28,22 +28,22 @@ const productJSONEnv = "WORKBUDDY2API_PRODUCT_JSON"
 // localModel is one entry of product.json "models". Only the fields that
 // matter for an OpenAI-shaped listing are decoded.
 type localModel struct {
-	ID                string          `json:"id"`
-	Name              string          `json:"name"`
-	Credits           string          `json:"credits"`
-	Vendor            string          `json:"vendor"`
-	DescriptionEn     string          `json:"descriptionEn"`
-	MaxInputTokens    int             `json:"maxInputTokens"`
-	MaxOutputTokens   int             `json:"maxOutputTokens"`
-	SupportsImages    bool            `json:"supportsImages"`
-	SupportsToolCall  bool            `json:"supportsToolCall"`
-	SupportsReasoning bool            `json:"supportsReasoning"`
-	OnlyReasoning     bool            `json:"onlyReasoning"`
-	CanDisableThinking bool           `json:"canDisableThinking"`
-	Tags              []string        `json:"tags"`
-	VideoGeneration   json.RawMessage `json:"videoGeneration"`
-	ImageGeneration   json.RawMessage `json:"imageGeneration"`
-	Reasoning         *struct {
+	ID                 string          `json:"id"`
+	Name               string          `json:"name"`
+	Credits            string          `json:"credits"`
+	Vendor             string          `json:"vendor"`
+	DescriptionEn      string          `json:"descriptionEn"`
+	MaxInputTokens     int             `json:"maxInputTokens"`
+	MaxOutputTokens    int             `json:"maxOutputTokens"`
+	SupportsImages     bool            `json:"supportsImages"`
+	SupportsToolCall   bool            `json:"supportsToolCall"`
+	SupportsReasoning  bool            `json:"supportsReasoning"`
+	OnlyReasoning      bool            `json:"onlyReasoning"`
+	CanDisableThinking bool            `json:"canDisableThinking"`
+	Tags               []string        `json:"tags"`
+	VideoGeneration    json.RawMessage `json:"videoGeneration"`
+	ImageGeneration    json.RawMessage `json:"imageGeneration"`
+	Reasoning          *struct {
 		CanDisableThinking bool `json:"canDisableThinking"`
 	} `json:"reasoning"`
 }
@@ -307,7 +307,15 @@ func reasoningTokenFloor(payload map[string]any) int {
 		return 0
 	}
 	for _, key := range []string{"max_tokens", "max_completion_tokens"} {
-		if v, ok := payload[key].(float64); ok && v > 0 && v < reasoningFloorTokens {
+		// JSON requests carry float64; in-process Anthropic conversion carries int.
+		var v float64
+		switch n := payload[key].(type) {
+		case float64:
+			v = n
+		case int:
+			v = float64(n)
+		}
+		if v > 0 && v < reasoningFloorTokens {
 			return reasoningFloorTokens
 		}
 	}

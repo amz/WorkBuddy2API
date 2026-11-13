@@ -104,3 +104,20 @@ func BenchmarkScanChunkData(b *testing.B) {
 		scanChunkData(data)
 	}
 }
+
+func BenchmarkScanChunkDataJSONReference(b *testing.B) {
+	const data = `{"id":"chatcmpl-123","model":"claude","choices":[{"index":0,"delta":{"content":"some generated text"},"finish_reason":""}]}`
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		var chunk struct {
+			ID, Model string
+			Choices   []struct {
+				Index        int
+				FinishReason string `json:"finish_reason"`
+			}
+		}
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
