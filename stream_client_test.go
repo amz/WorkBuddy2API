@@ -214,3 +214,61 @@ func TestNewHTTPClient_TransportPoolSizes(t *testing.T) {
 		})
 	}
 }
+
+// TestPickIP_Rotates pins pickIP: members only, trailing dot trimmed, empty
+// input yields "", and the pick actually rotates across draws (the resolved
+// branch of DialContext claims to randomize).
+func TestPickIP_Rotates(t *testing.T) {
+	if got := pickIP(nil); got != "" {
+		t.Fatalf("pickIP(nil) = %q, want empty", got)
+	}
+	if got := pickIP([]string{}); got != "" {
+		t.Fatalf("pickIP(empty) = %q, want empty", got)
+	}
+	ips := []string{"10.0.0.1.", "10.0.0.2", "10.0.0.3."}
+	seen := map[string]int{}
+	for i := 0; i < 100; i++ {
+		ip := pickIP(ips)
+		if strings.HasSuffix(ip, ".") {
+			t.Fatalf("pickIP returned untrimmed %q", ip)
+		}
+		if ip != "10.0.0.1" && ip != "10.0.0.2" && ip != "10.0.0.3" {
+			t.Fatalf("pickIP returned %q, not a member of %v", ip, ips)
+		}
+		seen[ip]++
+	}
+	if len(seen) < 2 {
+		t.Fatalf("pickIP never rotated in 100 draws: %v", seen)
+	}
+}
+
+// TestDialContext_FailingResolverUsesKnownIPs drives the production DialContext
+// end to end against an unresolvable host. The fallback list is temporarily
+// pointed at a loopback listener, so a successful round trip is only possible
+// if the fallback branch dialed the swapped-in address — no external network
+// involved, and a stale fallback IP (the bug this pins) would fail the dial.
+func TestDialContext_FailingResolverUsesKnownIPs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	host, port, err := net.SplitHostPort(strings.TrimPrefix(srv.URL, "http://"))
+	if err != nil {
+		t.Fatalf("test server address: %v", err)
+	}
+
+	orig := knownUpstreamIPs
+	knownUpstreamIPs = []string{host}
+	defer func() { knownUpstreamIPs = orig }()
+
+	c := newHTTPClient(5 * time.Second)
+	resp, err := c.Get("http://nonexistent.invalid:" + port + "/")
+	if err != nil {
+		t.Fatalf("request through fallback dial failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (fallback dial did not reach the listener)", resp.StatusCode)
+	}
+}
