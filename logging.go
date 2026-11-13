@@ -9,11 +9,15 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 // Logger writes per-request traces to a file. Disabled when path is empty.
+// `on` mirrors `f != nil` so the per-line hot path can bail out without
+// touching the mutex.
 type Logger struct {
+	on   atomic.Bool
 	mu   sync.Mutex
 	f    *os.File
 	path string
@@ -33,26 +37,25 @@ func EnableLogging(path string) error {
 			reqLogger.f = nil
 			reqLogger.path = ""
 		}
-		return nil
+	} else {
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		if err != nil {
+			return fmt.Errorf("open log file: %w", err)
+		}
+		if reqLogger.f != nil {
+			reqLogger.f.Close()
+		}
+		reqLogger.f = f
+		reqLogger.path = path
 	}
-
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
-	if err != nil {
-		return fmt.Errorf("open log file: %w", err)
-	}
-	if reqLogger.f != nil {
-		reqLogger.f.Close()
-	}
-	reqLogger.f = f
-	reqLogger.path = path
+	reqLogger.on.Store(reqLogger.f != nil)
 	return nil
 }
 
-// LoggingEnabled reports whether a trace file is open.
+// LoggingEnabled reports whether a trace file is open. Atomic so the request
+// hot path can check it without contending on the logger mutex.
 func LoggingEnabled() bool {
-	reqLogger.mu.Lock()
-	defer reqLogger.mu.Unlock()
-	return reqLogger.f != nil
+	return reqLogger.on.Load()
 }
 
 // newCorrelationID returns a short random id used to tie the lines of a single
@@ -85,6 +88,9 @@ func redact(s string) string {
 
 // logLine writes a single timestamped, correlation-tagged line.
 func logLine(cid, format string, args ...any) {
+	if !LoggingEnabled() {
+		return
+	}
 	reqLogger.mu.Lock()
 	defer reqLogger.mu.Unlock()
 	if reqLogger.f == nil {

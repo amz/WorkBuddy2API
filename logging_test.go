@@ -110,6 +110,36 @@ func TestEnableLogging_EmptyPathDisables(t *testing.T) {
 	}
 }
 
+func TestLogLine_DisabledIsZeroCost(t *testing.T) {
+	// Disabled baseline: logLine must be a no-op that neither creates the
+	// trace file nor panics, even when hammered.
+	if err := EnableLogging(""); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	if LoggingEnabled() {
+		t.Fatal("logging should be disabled after EnableLogging(\"\")")
+	}
+	for i := 0; i < 10_000; i++ {
+		logLine("deadbeef", "probe %d", i)
+	}
+
+	// Round trip: enabling flips the flag, disabling clears it.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "trace.log")
+	if err := EnableLogging(path); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	if !LoggingEnabled() {
+		t.Fatal("logging should be enabled after EnableLogging(path)")
+	}
+	if err := EnableLogging(""); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	if LoggingEnabled() {
+		t.Fatal("logging should be disabled after EnableLogging(\"\")")
+	}
+}
+
 func TestLogBlock_TagsEveryLine(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "trace.log")

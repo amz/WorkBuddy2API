@@ -262,10 +262,17 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 	cid := newCorrelationID()
 	started := time.Now()
-	reqModel, _, msgCount, lastUser := summariseRequest(body)
-	logLine(cid, "▶ REQUEST %s | stream=%v | msgs=%d | last_user=%q",
-		reqModel, clientWantsStream, msgCount, lastUser)
-	logBlock(cid, "REQUEST BODY", string(body))
+	// reqModel/msgCount come free from the already-decoded map: they are
+	// needed beyond logging (model verdicts, chunk-meta fallback). Only the
+	// log formatting work is gated on LoggingEnabled.
+	reqModel, _ := payload["model"].(string)
+	msgCount := len(msgs)
+	if LoggingEnabled() {
+		_, _, _, lastUser := summariseRequest(body)
+		logLine(cid, "▶ REQUEST %s | stream=%v | msgs=%d | last_user=%q",
+			reqModel, clientWantsStream, msgCount, lastUser)
+		logBlock(cid, "REQUEST BODY", string(body))
+	}
 
 	payload["stream"] = true
 
