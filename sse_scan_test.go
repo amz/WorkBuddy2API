@@ -11,6 +11,7 @@ import (
 func TestNormalizeIntermediateFinishReason_ByteExact(t *testing.T) {
 	for _, tt := range []struct{ name, in, want string }{
 		{"spaced", `data: { "z":1, "choices" : [ { "finish_reason" : "" } ] }`, `data: { "z":1, "choices" : [ { "finish_reason" : null } ] }`},
+		{"tabs and newlines", "data: {\"choices\":[{\"finish_reason\": \t\r\n \"\"}]}", "data: {\"choices\":[{\"finish_reason\": \t\r\n null}]}"},
 		{"two", `data: {"choices":[{"finish_reason":""},{"index":1,"finish_reason":""}]}`, `data: {"choices":[{"finish_reason":null},{"index":1,"finish_reason":null}]}`},
 		{"escaped content", `data: {"choices":[{"delta":{"content":"\"finish_reason\":\"\""},"finish_reason":""}]}`, `data: {"choices":[{"delta":{"content":"\"finish_reason\":\"\""},"finish_reason":null}]}`},
 		{"root", `data: {"finish_reason":"","choices":[]}`, `data: {"finish_reason":"","choices":[]}`},

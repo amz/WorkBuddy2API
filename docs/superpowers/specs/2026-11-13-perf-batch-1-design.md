@@ -74,7 +74,8 @@ func scanChunkData(data string) (sseChunkScan, bool)
 Scanner rules (single pass over the bytes):
 - Root must be `{`; trailing garbage after the root object → accepted (divergence, below).
 - `id`, `model`: tracked only at root; wrong JSON type → ok=false (matches old unmarshal error). Needs full string decoding (escapes incl. `\uXXXX` + surrogate pairs).
-- `choices`: must be an array; not-array → ok=false. `index`/`finish_reason` tracked only for direct elements. Duplicate `choices` member resets the slice (last-wins, matches decode semantics). Non-integer `index` (e.g. string) → ok=false (old code failed the whole line too). `finish_reason` null → treated absent (no span; old code also made no change). Wrong-typed tracked values → ok=false.
+- `choices`: array or null; other types → ok=false. Null clears the slice without discarding root metadata (PR review corrected the original array-only rule). `index`/`finish_reason` tracked only for direct elements. Duplicate `choices` member resets the slice (last-wins, matches decode semantics). Non-integer `index` (e.g. string) → ok=false (old code failed the whole line too). `finish_reason` null → treated absent (no span; old pointer-based terminal decoder also cleared it). Wrong-typed tracked values → ok=false.
+- Tracked field names match case-insensitively, preserving the old struct decoder's matching. Normalization retains its exact lowercase-key pre-check, matching its old map-based behavior.
 - Strings being skipped (e.g. content) are scanned to the unescaped closing quote without escape validation (raw control chars accepted — divergence, below).
 
 Helpers keep their signatures; each goes: `sseData` → existing bail conditions → `scanChunkData`; `ok=false` → old nil/meta-unchanged/line-unchanged behavior:

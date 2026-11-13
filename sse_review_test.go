@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"reflect"
 	"testing"
 )
 
@@ -16,6 +18,35 @@ func TestCopySSELogged_NullChoicesPreserveTerminalMetadata(t *testing.T) {
 	}
 	if got := terminalFinishReasons(chunks); got[0] != "length" {
 		t.Fatalf("want terminal for choice 0: %v", got)
+	}
+}
+
+// The pre-optimization choiceFinishReasons used *string, not string. JSON null
+// clears a pointer even after an earlier duplicate terminal reason.
+func TestChoiceFinishReasons_DuplicateNullMatchesPointerDecoder(t *testing.T) {
+	for _, data := range []string{
+		`{"choices":[{"index":2,"finish_reason":"stop","finish_reason":null}]}`,
+		`{"choices":[{"index":2,"finish_reason":null,"finish_reason":"stop"}]}`,
+		`{"choices":[{"index":2,"finish_reason":"","finish_reason":null}]}`,
+	} {
+		var old struct {
+			Choices []struct {
+				Index        int     `json:"index"`
+				FinishReason *string `json:"finish_reason"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(data), &old); err != nil {
+			t.Fatal(err)
+		}
+		want := make(map[int]string)
+		for _, ch := range old.Choices {
+			if ch.FinishReason != nil && *ch.FinishReason != "" {
+				want[ch.Index] = *ch.FinishReason
+			}
+		}
+		if got := choiceFinishReasons("data: " + data); !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s: got %v, old pointer decoder %v", data, got, want)
+		}
 	}
 }
 
