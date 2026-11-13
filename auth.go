@@ -33,8 +33,19 @@ const (
 
 // knownUpstreamIPs: IPs that have been observed serving workbuddy.ai.
 // Used as fallback when DNS flakes (the domain sometimes returns 0.0.0.1).
+// Re-verified 2026-11-13 via dig +short www.workbuddy.ai:
+// CNAME www.workbuddy.ai.eo.dnse2.com. → 43.169.32.91.
 var knownUpstreamIPs = []string{
-	"43.163.17.187",
+	"43.169.32.91",
+}
+
+// pickIP picks a random member of ips, trimming the trailing dot DNS names
+// sometimes carry. Empty input yields "".
+func pickIP(ips []string) string {
+	if len(ips) == 0 {
+		return ""
+	}
+	return strings.TrimSuffix(ips[rand.Intn(len(ips))], ".")
 }
 
 // newHTTPClient creates an HTTP client with a custom resolver that falls
@@ -65,19 +76,21 @@ func newHTTPClient(timeout time.Duration) *http.Client {
 				ips, err := resolver.LookupAddr(ctx, host)
 				if err != nil || len(ips) == 0 {
 					// Fallback to known IPs
-					if len(knownUpstreamIPs) > 0 {
-						ip := knownUpstreamIPs[rand.Intn(len(knownUpstreamIPs))]
-						return dialer.DialContext(ctx, network, net.JoinHostPort(ip, port))
-					}
+					ips = knownUpstreamIPs
+				}
+				ip := pickIP(ips)
+				if ip == "" {
 					return nil, fmt.Errorf("no IPs for %s", host)
 				}
-				// Pick a random resolved IP
-				ip := strings.TrimSuffix(ips[0], ".")
 				return dialer.DialContext(ctx, network, net.JoinHostPort(ip, port))
 			},
 			TLSClientConfig:     &tls.Config{ServerName: upstreamHost},
 			TLSHandshakeTimeout: 10 * time.Second,
-			MaxIdleConns:        10,
+			// Sized pools: the net/http default MaxIdleConnsPerHost is 2,
+			// which forces a TLS re-handshake (~30 ms) whenever a burst of
+			// sequential requests exceeds two idle connections.
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 32,
 			IdleConnTimeout:     90 * time.Second,
 		},
 	}

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRedact_CoversHeaderAndCamelCaseKeys(t *testing.T) {
@@ -107,6 +108,58 @@ func TestEnableLogging_EmptyPathDisables(t *testing.T) {
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("trace file should still exist: %v", err)
+	}
+}
+
+func TestLogLine_DisabledIsZeroCost(t *testing.T) {
+	t.Cleanup(func() { EnableLogging("") })
+	// Disabled baseline: logLine must be a no-op that neither creates the
+	// trace file nor panics, even when hammered.
+	if err := EnableLogging(""); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	if LoggingEnabled() {
+		t.Fatal("logging should be disabled after EnableLogging(\"\")")
+	}
+	for i := 0; i < 10_000; i++ {
+		logLine("deadbeef", "probe %d", i)
+	}
+	// Deliberately hold the mutex: neither the enabled check nor a disabled
+	// log call may wait for it. Release before failing so a regressed worker
+	// cannot leak or deadlock later tests.
+	reqLogger.mu.Lock()
+	done := make(chan struct{})
+	go func() {
+		LoggingEnabled()
+		logLine("deadbeef", "disabled while mutex is held")
+		close(done)
+	}()
+	blocked := false
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		blocked = true
+	}
+	reqLogger.mu.Unlock()
+	<-done
+	if blocked {
+		t.Fatal("disabled logging waited for the logger mutex")
+	}
+
+	// Round trip: enabling flips the flag, disabling clears it.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "trace.log")
+	if err := EnableLogging(path); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	if !LoggingEnabled() {
+		t.Fatal("logging should be enabled after EnableLogging(path)")
+	}
+	if err := EnableLogging(""); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	if LoggingEnabled() {
+		t.Fatal("logging should be disabled after EnableLogging(\"\")")
 	}
 }
 

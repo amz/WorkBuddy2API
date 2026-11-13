@@ -28,7 +28,7 @@ func NewServer(client *UpstreamClient, am *AuthManager, apiKey string, desensiti
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/models", s.handleModels)
-	mux.HandleFunc("/v1/models/", s.handleModels)   // catches /v1/models/<id>
+	mux.HandleFunc("/v1/models/", s.handleModels) // catches /v1/models/<id>
 	mux.HandleFunc("/v1/chat/completions", s.handleChat)
 	mux.HandleFunc("/v1/messages", s.handleAnthropic)
 	mux.HandleFunc("/healthz", s.handleHealth)
@@ -122,15 +122,15 @@ type modelObject struct {
 
 func toModelObject(m CachedModel, now int64) modelObject {
 	return modelObject{
-		ID:                m.ID,
-		Object:            "model",
-		Created:           now,
-		OwnedBy:           "workbuddy",
-		Name:              m.Name,
-		Description:       m.Description,
-		Vendor:            m.Vendor,
-		MaxInputTokens:    m.MaxInputTokens,
-		MaxOutputTokens:   m.MaxOutputTokens,
+		ID:                 m.ID,
+		Object:             "model",
+		Created:            now,
+		OwnedBy:            "workbuddy",
+		Name:               m.Name,
+		Description:        m.Description,
+		Vendor:             m.Vendor,
+		MaxInputTokens:     m.MaxInputTokens,
+		MaxOutputTokens:    m.MaxOutputTokens,
 		SupportsImages:     m.SupportsImages,
 		SupportsToolCall:   m.SupportsToolCall,
 		SupportsReasoning:  m.SupportsReasoning,
@@ -229,37 +229,53 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "read body: "+err.Error(), "invalid_request_error")
 		return
 	}
-	var probe struct {
-		Model    string `json:"model"`
-		Stream   *bool  `json:"stream"`
-		Messages []any  `json:"messages"`
-	}
-	if err := json.Unmarshal(body, &probe); err != nil {
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
 		writeError(w, http.StatusBadRequest, "request body must be valid JSON", "invalid_request_error")
 		return
 	}
-	if strings.TrimSpace(probe.Model) == "" {
+	// Validation reads the already-decoded map; the body is decoded once.
+	// Match the old struct decoder: reject wrong types before required-field
+	// checks, but accept JSON null as the corresponding zero value.
+	_, modelOK := payload["model"].(string)
+	msgs, messagesOK := payload["messages"].([]any)
+	_, streamOK := payload["stream"].(bool)
+	if (payload["model"] != nil && !modelOK) ||
+		(payload["messages"] != nil && !messagesOK) ||
+		(payload["stream"] != nil && !streamOK) {
+		writeError(w, http.StatusBadRequest, "request body must be valid JSON", "invalid_request_error")
+		return
+	}
+	if m, _ := payload["model"].(string); strings.TrimSpace(m) == "" {
 		writeError(w, http.StatusBadRequest, "model is required", "invalid_request_error")
 		return
 	}
-	if len(probe.Messages) == 0 {
+	if len(msgs) == 0 {
 		writeError(w, http.StatusBadRequest, "messages must not be empty", "invalid_request_error")
 		return
 	}
 	// WorkBuddy only supports streaming. Always request stream from upstream.
 	// When the client wants non-streaming, buffer the SSE chunks and return
 	// a single assembled JSON response.
-	clientWantsStream := probe.Stream == nil || *probe.Stream
+	clientWantsStream := true
+	if v, ok := payload["stream"].(bool); ok {
+		clientWantsStream = v
+	}
 
 	cid := newCorrelationID()
 	started := time.Now()
-	reqModel, _, msgCount, lastUser := summariseRequest(body)
-	logLine(cid, "▶ REQUEST %s | stream=%v | msgs=%d | last_user=%q",
-		reqModel, clientWantsStream, msgCount, lastUser)
-	logBlock(cid, "REQUEST BODY", string(body))
+	// reqModel/msgCount come free from the already-decoded map: they are
+	// needed beyond logging (model verdicts, chunk-meta fallback). Only the
+	// log formatting work is gated on LoggingEnabled.
+	reqModel, _ := payload["model"].(string)
+	msgCount := len(msgs)
+	if LoggingEnabled() {
+		_, _, _, lastUser := summariseRequest(body)
+		logLine(cid, "▶ REQUEST %s | stream=%v | msgs=%d | last_user=%q",
+			reqModel, clientWantsStream, msgCount, lastUser)
+		logBlock(cid, "REQUEST BODY", string(body))
+	}
 
-	var payload map[string]any
-	_ = json.Unmarshal(body, &payload)
 	payload["stream"] = true
 
 	// Desensitize mode: rewrite moderation-triggering keywords in the system
@@ -280,9 +296,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	body, _ = json.Marshal(payload)
-
-	resp, am, err := s.client.Chat(r.Context(), body)
+	resp, am, err := s.client.Chat(r.Context(), payload)
 	if err != nil {
 		logLine(cid, "✗ UPSTREAM ERROR %s | %s", reqModel, err)
 		writeError(w, http.StatusBadGateway, "upstream: "+err.Error(), "server_error")
@@ -480,57 +494,31 @@ func isDoneLine(line string) bool {
 
 // normalizeIntermediateFinishReason rewrites the non-standard
 // `"finish_reason": ""` that the upstream gateway puts on every intermediate
-// chunk to `null`, which is what the OpenAI schema specifies. Parsing the line
-// as JSON (rather than replacing substrings) avoids corrupting chunk content
-// that happens to contain the same text, and covers any JSON whitespace layout.
+// chunk to `null`, which is what the OpenAI schema specifies. Scan direct
+// choice fields and replace only their value spans, preserving all other bytes.
 func normalizeIntermediateFinishReason(line string) string {
 	data, ok := sseData(line)
 	if !ok || data == "[DONE]" || !strings.Contains(data, `"finish_reason"`) {
 		return line
 	}
-	var chunk struct {
-		Choices []struct {
-			FinishReason json.RawMessage `json:"finish_reason"`
-		} `json:"choices"`
-	}
-	if json.Unmarshal([]byte(data), &chunk) != nil {
+	chunk, ok := scanChunkData(data)
+	if !ok {
 		return line
 	}
-	changed := false
-	for i := range chunk.Choices {
-		if string(chunk.Choices[i].FinishReason) == `""` {
-			chunk.Choices[i].FinishReason = json.RawMessage(`null`)
-			changed = true
+	var fixed strings.Builder
+	last := 0
+	for _, ch := range chunk.choices {
+		if span := ch.emptyFRSpan; span[0] >= 0 {
+			fixed.WriteString(data[last:span[0]])
+			fixed.WriteString("null")
+			last = span[1]
 		}
 	}
-	if !changed {
+	if last == 0 {
 		return line
 	}
-	// Decode into a generic map so unknown upstream fields survive, then
-	// replace only the finish_reason values.
-	var generic map[string]json.RawMessage
-	if json.Unmarshal([]byte(data), &generic) != nil {
-		return line
-	}
-	var choices []map[string]json.RawMessage
-	if json.Unmarshal(generic["choices"], &choices) != nil {
-		return line
-	}
-	for i := range choices {
-		if string(choices[i]["finish_reason"]) == `""` {
-			choices[i]["finish_reason"] = json.RawMessage(`null`)
-		}
-	}
-	normalizedChoices, err := json.Marshal(choices)
-	if err != nil {
-		return line
-	}
-	generic["choices"] = normalizedChoices
-	payload, err := json.Marshal(generic)
-	if err != nil {
-		return line
-	}
-	return "data: " + string(payload)
+	fixed.WriteString(data[last:])
+	return "data: " + fixed.String()
 }
 
 // sseChunkMeta carries the identity of the upstream completion so a synthesized
@@ -545,18 +533,15 @@ func chunkMetaFromLine(line string, meta sseChunkMeta) sseChunkMeta {
 	if !ok || data == "[DONE]" {
 		return meta
 	}
-	var c struct {
-		ID    string `json:"id"`
-		Model string `json:"model"`
-	}
-	if json.Unmarshal([]byte(data), &c) != nil {
+	c, ok := scanChunkData(data)
+	if !ok {
 		return meta
 	}
-	if c.ID != "" {
-		meta.id = c.ID
+	if c.id != "" {
+		meta.id = c.id
 	}
-	if c.Model != "" {
-		meta.model = c.Model
+	if c.model != "" {
+		meta.model = c.model
 	}
 	return meta
 }
@@ -713,17 +698,13 @@ func choiceIndexes(line string) map[int]bool {
 	if !ok || data == "[DONE]" {
 		return nil
 	}
-	var c struct {
-		Choices []struct {
-			Index int `json:"index"`
-		} `json:"choices"`
-	}
-	if json.Unmarshal([]byte(data), &c) != nil {
+	c, ok := scanChunkData(data)
+	if !ok {
 		return nil
 	}
-	out := make(map[int]bool, len(c.Choices))
-	for _, ch := range c.Choices {
-		out[ch.Index] = true
+	out := make(map[int]bool, len(c.choices))
+	for _, ch := range c.choices {
+		out[ch.index] = true
 	}
 	return out
 }
@@ -809,14 +790,12 @@ func (s *Server) handleAnthropic(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	openaiBody, _ := json.Marshal(payload)
-
 	cid := newCorrelationID()
 	started := time.Now()
 	logLine(cid, "▶ ANTHROPIC %s | max_tokens=%d | stream=%v",
 		ar.Model, ar.MaxTokens, ar.Stream == nil || *ar.Stream)
 
-	resp, am, err := s.client.Chat(r.Context(), openaiBody)
+	resp, am, err := s.client.Chat(r.Context(), payload)
 	if err != nil {
 		logLine(cid, "✗ UPSTREAM ERROR %s | %s", ar.Model, err)
 		writeAnthropicError(w, http.StatusBadGateway, "upstream: "+err.Error(), "api_error")

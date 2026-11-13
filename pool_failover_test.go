@@ -339,7 +339,7 @@ func TestFetchModelsFor_FailsOverWhenFirstAccountQuotaLimited(t *testing.T) {
 func TestChat_ReturnsServingAccount(t *testing.T) {
 	a := fakeAuth("single", &scriptedTransport{status: 200, body: "data: [DONE]\n\n"})
 	c := NewUpstreamClient(a)
-	resp, am, err := c.Chat(context.Background(), []byte(`{"model":"m","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+	resp, am, err := c.Chat(context.Background(), map[string]any{"model": "m", "stream": true, "messages": []any{map[string]any{"role": "user", "content": "hi"}}})
 	if err != nil {
 		t.Fatalf("Chat: %v", err)
 	}
@@ -356,7 +356,7 @@ func TestChat_PoolReturnsAccountThatServedAfterFailover(t *testing.T) {
 	forceStart(p, 0)
 	c := NewUpstreamClientPool(p)
 
-	resp, am, err := c.Chat(context.Background(), []byte(`{"model":"m","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+	resp, am, err := c.Chat(context.Background(), map[string]any{"model": "m", "stream": true, "messages": []any{map[string]any{"role": "user", "content": "hi"}}})
 	if err != nil {
 		t.Fatalf("Chat: %v", err)
 	}

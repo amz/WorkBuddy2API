@@ -283,7 +283,7 @@ func NewUpstreamClientPool(pool *AccountPool) *UpstreamClient {
 // Chat forwards an OpenAI chat request to /v2/chat/completions. It returns the
 // response and the account that served it, so the handler can attribute model
 // verdicts to the right account when a pool is in use.
-func (c *UpstreamClient) Chat(ctx context.Context, reqBody []byte) (*http.Response, *AuthManager, error) {
+func (c *UpstreamClient) Chat(ctx context.Context, reqBody map[string]any) (*http.Response, *AuthManager, error) {
 	return c.chatWithOptions(ctx, reqBody, chatOptions{})
 }
 
@@ -297,11 +297,8 @@ type chatOptions struct {
 // ctx is the incoming client request's context: when the caller disconnects,
 // the upstream request is cancelled so generation stops instead of running on.
 // It returns the response and the account that served it.
-func (c *UpstreamClient) chatWithOptions(ctx context.Context, reqBody []byte, opts chatOptions) (*http.Response, *AuthManager, error) {
-	var payload map[string]any
-	if err := json.Unmarshal(reqBody, &payload); err != nil {
-		return nil, nil, fmt.Errorf("invalid request JSON: %w", err)
-	}
+func (c *UpstreamClient) chatWithOptions(ctx context.Context, reqBody map[string]any, opts chatOptions) (*http.Response, *AuthManager, error) {
+	payload := reqBody
 
 	// stream defaults to true
 	if _, ok := payload["stream"]; !ok {

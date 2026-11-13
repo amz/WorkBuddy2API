@@ -237,15 +237,12 @@ func needsProbe(uid, model string) bool {
 }
 
 func probeModel(client *UpstreamClient, uid, model string) {
-	body, err := json.Marshal(map[string]any{
+	payload := map[string]any{
 		"model":      model,
 		"messages":   []any{map[string]any{"role": "user", "content": "ping"}},
 		"max_tokens": 1,
-	})
-	if err != nil {
-		return
 	}
-	resp, am, err := client.chatWithOptions(context.Background(), body, chatOptions{skipReasoningFloor: true})
+	resp, am, err := client.chatWithOptions(context.Background(), payload, chatOptions{skipReasoningFloor: true})
 	if err != nil {
 		return
 	}

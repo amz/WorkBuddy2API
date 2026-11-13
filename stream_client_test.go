@@ -190,3 +190,85 @@ func (b *stallingBody) Read(p []byte) (int, error) {
 }
 
 func (b *stallingBody) Close() error { return nil }
+
+// TestNewHTTPClient_TransportPoolSizes pins the connection-pool sizing: the
+// net/http default MaxIdleConnsPerHost is 2, which forces TLS re-handshakes
+// (~30 ms each) under bursty sequential load. Both clients must carry the
+// sized transport.
+func TestNewHTTPClient_TransportPoolSizes(t *testing.T) {
+	for name, c := range map[string]*http.Client{
+		"newHTTPClient":          newHTTPClient(30 * time.Second),
+		"newStreamingHTTPClient": newStreamingHTTPClient(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			transport, ok := c.Transport.(*http.Transport)
+			if !ok {
+				t.Fatalf("transport = %T, want *http.Transport", c.Transport)
+			}
+			if transport.MaxIdleConnsPerHost != 32 {
+				t.Errorf("MaxIdleConnsPerHost = %d, want 32", transport.MaxIdleConnsPerHost)
+			}
+			if transport.MaxIdleConns != 100 {
+				t.Errorf("MaxIdleConns = %d, want 100", transport.MaxIdleConns)
+			}
+		})
+	}
+}
+
+// TestPickIP_Rotates pins pickIP: members only, trailing dot trimmed, empty
+// input yields "", and the pick actually rotates across draws (the resolved
+// branch of DialContext claims to randomize).
+func TestPickIP_Rotates(t *testing.T) {
+	if got := pickIP(nil); got != "" {
+		t.Fatalf("pickIP(nil) = %q, want empty", got)
+	}
+	if got := pickIP([]string{}); got != "" {
+		t.Fatalf("pickIP(empty) = %q, want empty", got)
+	}
+	ips := []string{"10.0.0.1.", "10.0.0.2", "10.0.0.3."}
+	seen := map[string]int{}
+	for i := 0; i < 100; i++ {
+		ip := pickIP(ips)
+		if strings.HasSuffix(ip, ".") {
+			t.Fatalf("pickIP returned untrimmed %q", ip)
+		}
+		if ip != "10.0.0.1" && ip != "10.0.0.2" && ip != "10.0.0.3" {
+			t.Fatalf("pickIP returned %q, not a member of %v", ip, ips)
+		}
+		seen[ip]++
+	}
+	if len(seen) < 2 {
+		t.Fatalf("pickIP never rotated in 100 draws: %v", seen)
+	}
+}
+
+// TestDialContext_FailingResolverUsesKnownIPs drives the production DialContext
+// end to end against an unresolvable host. The fallback list is temporarily
+// pointed at a loopback listener, so a successful round trip is only possible
+// if the fallback branch dialed the swapped-in address — no external network
+// involved, and a stale fallback IP (the bug this pins) would fail the dial.
+func TestDialContext_FailingResolverUsesKnownIPs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	host, port, err := net.SplitHostPort(strings.TrimPrefix(srv.URL, "http://"))
+	if err != nil {
+		t.Fatalf("test server address: %v", err)
+	}
+
+	orig := knownUpstreamIPs
+	knownUpstreamIPs = []string{host}
+	defer func() { knownUpstreamIPs = orig }()
+
+	c := newHTTPClient(5 * time.Second)
+	resp, err := c.Get("http://nonexistent.invalid:" + port + "/")
+	if err != nil {
+		t.Fatalf("request through fallback dial failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (fallback dial did not reach the listener)", resp.StatusCode)
+	}
+}
