@@ -77,7 +77,11 @@ func newHTTPClient(timeout time.Duration) *http.Client {
 			},
 			TLSClientConfig:     &tls.Config{ServerName: upstreamHost},
 			TLSHandshakeTimeout: 10 * time.Second,
-			MaxIdleConns:        10,
+			// Sized pools: the net/http default MaxIdleConnsPerHost is 2,
+			// which forces a TLS re-handshake (~30 ms) whenever a burst of
+			// sequential requests exceeds two idle connections.
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 32,
 			IdleConnTimeout:     90 * time.Second,
 		},
 	}

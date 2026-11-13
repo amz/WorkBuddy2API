@@ -190,3 +190,27 @@ func (b *stallingBody) Read(p []byte) (int, error) {
 }
 
 func (b *stallingBody) Close() error { return nil }
+
+// TestNewHTTPClient_TransportPoolSizes pins the connection-pool sizing: the
+// net/http default MaxIdleConnsPerHost is 2, which forces TLS re-handshakes
+// (~30 ms each) under bursty sequential load. Both clients must carry the
+// sized transport.
+func TestNewHTTPClient_TransportPoolSizes(t *testing.T) {
+	for name, c := range map[string]*http.Client{
+		"newHTTPClient":          newHTTPClient(30 * time.Second),
+		"newStreamingHTTPClient": newStreamingHTTPClient(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			transport, ok := c.Transport.(*http.Transport)
+			if !ok {
+				t.Fatalf("transport = %T, want *http.Transport", c.Transport)
+			}
+			if transport.MaxIdleConnsPerHost != 32 {
+				t.Errorf("MaxIdleConnsPerHost = %d, want 32", transport.MaxIdleConnsPerHost)
+			}
+			if transport.MaxIdleConns != 100 {
+				t.Errorf("MaxIdleConns = %d, want 100", transport.MaxIdleConns)
+			}
+		})
+	}
+}
