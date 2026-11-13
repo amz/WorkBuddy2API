@@ -52,7 +52,8 @@ func scanChunkData(data string) (sseChunkScan, bool) {
 						ch.index = n
 						return err == nil
 					case key == "finish_reason" || strings.EqualFold(key, "finish_reason"):
-						ch.finish = ""
+						// A duplicate null must not erase a terminal reason.
+						// text leaves the prior string unchanged for null.
 						ch.emptyFRSpan = [2]int{-1, -1}
 						start := p.i
 						if !p.text(&ch.finish) {

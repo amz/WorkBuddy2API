@@ -20,6 +20,8 @@ func TestNormalizeIntermediateFinishReason_ByteExact(t *testing.T) {
 		{"passthrough", ` data:  {"z": "<script>", "choices":[{"delta":{"content":"hello"}}]} `, ` data:  {"z": "<script>", "choices":[{"delta":{"content":"hello"}}]} `},
 		{"duplicate choices", `data: {"choices":[{"finish_reason":""}],"choices":[{"finish_reason":"stop"}]}`, `data: {"choices":[{"finish_reason":""}],"choices":[{"finish_reason":"stop"}]}`},
 		{"duplicate reason", `data: {"choices":[{"finish_reason":"","finish_reason":null}]}`, `data: {"choices":[{"finish_reason":"","finish_reason":null}]}`},
+		{"duplicate empty reasons", `data: {"choices":[{"finish_reason":"","finish_reason":""}]}`, `data: {"choices":[{"finish_reason":"","finish_reason":null}]}`},
+		{"empty then terminal", `data: {"choices":[{"finish_reason":"","finish_reason":"stop"}]}`, `data: {"choices":[{"finish_reason":"","finish_reason":"stop"}]}`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := normalizeIntermediateFinishReason(tt.in); got != tt.want {
@@ -39,6 +41,8 @@ func TestScanChunkData_JSONReference(t *testing.T) {
 		`{"delta":{"id":"wrong","model":"wrong","choices":[{"index":8}]},"choices":[{"delta":{"finish_reason":"stop","index":99}}]}`,
 		`{"choices":[{"index":0}],"choices":[{"index":3,"finish_reason":"stop"}]}`,
 		`{"choices":[{"index":null,"finish_reason":null}]}`,
+		`{"choices":[{"index":2,"finish_reason":"stop","finish_reason":null}]}`,
+		`{"choices":[{"index":2,"finish_reason":"length","finish_reason":null,"finish_reason":null}]}`,
 		`{"id":"meta-only","model":"upstream-model","choices":null}`,
 		`{"choices":[{"index":3,"finish_reason":"stop"}],"choices":null}`,
 		`{"ID":"case-id","MODEL":"case-model","CHOICES":[{"INDEX":2,"FINISH_REASON":"stop"}]}`,
