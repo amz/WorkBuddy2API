@@ -136,19 +136,19 @@ Rationale: `shell: bash` is set explicitly so the redirection and `$(...)` are p
 
 - [ ] **Step 2: Verify the reporting logic**
 
-Run locally (Linux container, exercising the exact same commands the step runs, including the guarded conversion against a real summary file):
+Run locally by extracting the **exact `run:` block** from `ci.yml` and executing it in the container (do not retype it — bash interprets backticks differently inside double quotes, which silently produces an empty table):
+
 ```bash
-docker run --rm -v "$PWD":/src -w /src \
-  -e GITHUB_STEP_SUMMARY=/tmp/summary.md golang:1.23-bookworm \
-  bash -c 'go test -count=1 -covermode=atomic -coverprofile=coverage.out ./... && \
-    total=$(go tool cover -func=coverage.out | tail -1) && \
-    echo "Coverage: $total" && \
-    summary="$GITHUB_STEP_SUMMARY" && \
-    if command -v cygpath >/dev/null 2>&1; then summary=$(cygpath -u "$summary"); fi && \
-    { echo "## Code coverage"; echo ""; echo "```"; go tool cover -func=coverage.out; echo "```"; echo ""; echo "**$total**"; } >> "$summary" && \
-    echo "--- summary head ---" && head -5 "$summary" && echo "--- summary tail ---" && tail -2 "$summary"'
+awk '/^      - name: Coverage summary/{found=1} found && /^        run: \|/{inrun=1; next} inrun && /^      - name:/{exit} inrun {sub(/^          /, ""); print}' \
+  .github/workflows/ci.yml > /tmp/coverage-step.sh
+docker run --rm -v "$PWD":/src -w /src -v /tmp/coverage-step.sh:/work/step.sh:ro \
+  -e GITHUB_STEP_SUMMARY=/work/summary.md golang:1.23-bookworm \
+  bash -c 'mkdir -p /work && go test -count=1 -covermode=atomic -coverprofile=coverage.out ./... && bash /work/step.sh && \
+    grep -q "^## Code coverage" /work/summary.md && \
+    grep -q "WorkBuddy2API" /work/summary.md && \
+    grep -q "total:" /work/summary.md && tail -3 /work/summary.md'
 ```
-Expected: prints `Coverage: total: (statements) XX.X%`; summary head is `## Code coverage`; summary tail contains the `total:` line. Then confirm on the PR's CI run that the "Coverage summary" step is green and the run page shows the "Code coverage" table. This is what answers "is it visible on the PR" — the acceptance check for the whole plan.
+Expected: `Coverage: total: (statements) XX.X%` printed; the summary contains the heading, per-function rows (e.g. `NewAccountPool 86.2%`), and the `total:` line. Then confirm on the PR's CI run that the "Coverage summary" step is green and the run page shows the "Code coverage" table. This is what answers "is it visible on the PR" — the acceptance check for the whole plan.
 
 - [ ] **Step 3: Commit**
 

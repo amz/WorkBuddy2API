@@ -23,5 +23,24 @@ jobs:
       - name: Test
         run: go test -count=1 -covermode=atomic -coverprofile=coverage.out ./...
 
+      - name: Coverage summary
+        shell: bash
+        run: |
+          total=$(go tool cover -func=coverage.out | tail -1)
+          echo "Coverage: $total"
+          summary="$GITHUB_STEP_SUMMARY"
+          if command -v cygpath >/dev/null 2>&1; then
+            summary=$(cygpath -u "$summary")
+          fi
+          {
+            echo "## Code coverage"
+            echo ""
+            echo '```'
+            go tool cover -func=coverage.out
+            echo '```'
+            echo ""
+            echo "**$total**"
+          } >> "$summary"
+
       - name: Build
         run: go build -o WorkBuddy2API.exe .
