@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -203,12 +204,13 @@ func saveCredentials(path, uid string, tok *authTokenResponse) error {
 
 // isSafeLoginURL reports whether raw is an https URL with a host. The login
 // URL comes from the TLS-pinned upstream, but the OS openers accept arbitrary
-// schemes and local paths, so validate before handing it to exec.Command.
-// Only https is allowed; a valid https URL never starts with '-', which also
-// prevents macOS `open` from interpreting it as an option.
+// schemes and local paths, so validate before handing it to the opener.
+// Only https is allowed (scheme compared case-insensitively); a valid https
+// URL never starts with '-', which also prevents macOS `open` from
+// interpreting it as an option.
 func isSafeLoginURL(raw string) bool {
 	u, err := url.Parse(raw)
-	return err == nil && u.Scheme == "https" && u.Host != ""
+	return err == nil && strings.EqualFold(u.Scheme, "https") && u.Host != ""
 }
 
 func openBrowser(rawURL string) {
@@ -221,7 +223,7 @@ func openBrowser(rawURL string) {
 		{"open", rawURL},                                     // macOS
 		{"xdg-open", rawURL},                                 // Linux
 	} {
-		if err := startCmd(cmd[0], cmd[1:]...); err == nil {
+		if err := openURL(cmd[0], cmd[1:]...); err == nil {
 			return
 		}
 	}
