@@ -29,7 +29,8 @@ jobs:
           total=$(go tool cover -func=coverage.out | tail -1)
           echo "Coverage: $total"
           summary="$GITHUB_STEP_SUMMARY"
-          if command -v cygpath >/dev/null 2>&1; then
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            command -v cygpath >/dev/null 2>&1 || { echo "cygpath is required on Windows runners" >&2; exit 1; }
             summary=$(cygpath -u "$summary")
           fi
           {

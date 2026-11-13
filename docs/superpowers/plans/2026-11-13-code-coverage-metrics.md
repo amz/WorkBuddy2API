@@ -6,7 +6,7 @@
 
 **Architecture:** Coverage is measured by Go's built-in `-coverprofile` in the existing `ci.yml` Test step, summarized by `go tool cover -func`, surfaced in the workflow job summary (`$GITHUB_STEP_SUMMARY`) and logs, and archived as `coverage.out` plus an HTML report via `actions/upload-artifact`. A coverage badge is added to the README. This is a CI/reporting-only change: no product code, no dependencies, no response bodies, no API changes. Measurement is visibility-only by default (no pass/fail threshold).
 
-**Tech Stack:** Go 1.23 (`module WorkBuddy2API`, no `go.sum`, stdlib only), GitHub Actions, `go test -coverprofile` / `go tool cover` (stdlib toolchain), `actions/upload-artifact` (SHA-pinned), `GITHUB_STEP_SUMMARY`, `windows-latest` runner, Docker `golang:1.23-bookworm` for local verification (no native Go on the devbox).
+**Tech Stack:** Go 1.23 (`module WorkBuddy2API`, no `go.sum`, stdlib only), GitHub Actions, `go test -coverprofile` / `go tool cover` (stdlib toolchain), `actions/upload-artifact` (SHA-pinned), `GITHUB_STEP_SUMMARY`, `windows-latest` runner, Docker `golang:1.23-bookworm` for local verification (no native Go on the build host).
 
 **Spec:** This plan is the spec. It argues from the repo's current state: `.github/workflows/ci.yml` runs `go vet ./...`, `go test -count=1 ./...`, `go build -o WorkBuddy2API.exe .`; there is no coverage config, no Codecov/Coveralls, no `Makefile`, and no coverage badge. Design decisions (approach A, visibility-only, badge URL correction) were settled in conversation on 2026-11-13.
 
@@ -23,7 +23,7 @@ Both match the defaults the tasks below were written against, so no task changes
 - Current branch at time of writing: `ai/pin-actions-and-security-hardening` (HEAD `f5ab419`). This plan is a **separate, independent** change — start a new branch from `main` (or from the merged result of that branch), not on top of it, so the coverage PR stands alone.
 - Go version floor: `go 1.23` (`go.mod:3`). No new dependencies — stdlib only. Do not add a `go.sum`.
 - CI (`.github/workflows/ci.yml`) runs on `windows-latest`. All shell steps are PowerShell by default on that runner; write any shell snippets to be valid PowerShell, or set `shell: bash` explicitly. Tests must remain cross-platform-safe (no process spawning, no Unix-only paths, no shell).
-- **No native Go toolchain on this devbox** (`go` is not on PATH). Run all Go verification in a container:
+- **No native Go toolchain on the build host** (`go` is not on PATH). Run all Go verification in a container:
   `docker run --rm -v "$PWD":/src -w /src golang:1.23-bookworm sh -c 'go vet ./... && go test -count=1 -coverprofile=coverage.out -covermode=atomic ./... && go tool cover -func=coverage.out'`
 - **Confirmed decisions (2026-11-13):** Surface = **A** (job summary + artifacts + static badge, no external service); Gate = **visibility-only** (no threshold, CI never fails on a coverage number). B (Codecov) and C (`GITHUB_TOKEN` PR comment) are rejected.
 - **Base = standalone from `main`** (explicit human-partner choice). Consequence: `main`'s `ci.yml` has unpinned `actions/checkout@v4` / `actions/setup-go@v5`; Task 3 re-pins them so the "every `uses:` is 40-hex" assertion holds. This overlaps `ai/pin-actions-and-security-hardening`; a merge conflict on `ci.yml` is possible and resolvable.
@@ -49,7 +49,7 @@ No new Go files. No `Makefile`. No `go.sum`. No new workflow file.
 
 The five failure modes most likely to bite a maintainer, each pinned by a verification step:
 
-1. **A coverage step that fails on Windows breaks CI for every PR.** The existing runner is `windows-latest`; `go tool cover -func` and file redirection behave differently in PowerShell. Test: Task 2 verification runs the exact step logic in the `windows-latest` CI job (and locally via the Linux container), asserting the step exits 0 and prints a parseable `total:` line.
+1. **A coverage step that fails on Windows breaks CI for every PR.** The existing runner is `windows-latest`; `go tool cover -func` and file redirection behave differently in PowerShell. Test: Task 2 verification runs the exact step logic in the Linux container (both the `RUNNER_OS=Linux` success path and a simulated `RUNNER_OS=Windows`-without-`cygpath` loud-failure path); **the real `windows-latest` run is the merge gate in Task 6** — a green CI run on the PR showing the "Code coverage" table is required before merge, because no local verification can exercise Git Bash for Windows.
 2. **`-covermode=atomic` vs `set` on the concurrent SSE paths.** The codebase streams with goroutines/flushers; `set` mode can miscount or panic under `-race`/concurrency. Test: Task 1 uses `-covermode=atomic` and the verification asserts the profile's `mode:` line is `atomic`.
 3. **An unpinned `actions/upload-artifact` reintroduces the finding the last PR fixed.** Test: Task 3 verification asserts every `uses:` ref in `ci.yml` is 40-hex with a `# vX.Y.Z` comment, and re-resolves the SHA from the tag.
 4. **Generated coverage artifacts get committed.** Test: Task 4 verification runs `git status --short` after a local coverage run and asserts `coverage.out` / `coverage.html` do not appear.
@@ -283,7 +283,7 @@ With approach A there is no Codecov/Coveralls data source, so the badge cannot b
 [![Coverage](https://img.shields.io/badge/coverage-measured%20in%20CI-blue?logo=go)](https://github.com/amz/WorkBuddy2API/actions/workflows/ci.yml)
 ```
 
-Rationale: honest (it states the number is in CI, not a fake live percentage) and points at `amz/WorkBuddy2API`, the actual working remote (Review Focus #5). If the human partner later chooses approach B (Codecov), swap this for the Codecov badge `https://codecov.io/gh/amz/WorkBuddy2API/branch/main/graph/badge.svg`.
+Rationale: honest (it states the number is in CI, not a fake live percentage) and points at `amz/WorkBuddy2API`, the actual working remote (Review Focus #5). If approach B (Codecov) is chosen in a follow-up, swap this for the Codecov badge `https://codecov.io/gh/amz/WorkBuddy2API/branch/main/graph/badge.svg`.
 
 - [ ] **Step 2: Add the badge line**
 
@@ -320,7 +320,7 @@ gh pr create --repo amz/WorkBuddy2API --head ai/<slug> --base main \
   --title "ci: report Go code coverage on every PR" \
   --body "Adds -coverprofile to CI, publishes a per-function coverage table to the job summary, archives coverage.out + HTML as artifacts, and adds a coverage badge. Visibility only (no threshold). Workflow/README edits land via PR to avoid triggering the release workflow."
 ```
-Note: GitHub App installation for `amz` is `181059562`; ensure the token is minted for that org (`export GITHUB_APP_ORG=amz` / `GITHUB_APP_INSTALLATION_ID=181059562`) before `gh pr create`, per the devbox GitHub access notes.
+Note: `gh` authenticates as the `devbox-netlife-pl[bot]` service account. Repos outside the default org need the matching GitHub App installation selected (set `GITHUB_APP_ORG` / `GITHUB_APP_INSTALLATION_ID`) before `gh pr create`; see the local agent notes.
 
 - [ ] **Step 2: Acceptance check — answer "is it visible on the PR?"**
 
@@ -328,7 +328,7 @@ On the PR: open the **CI** check → the run page shows a **"Code coverage"** se
 
 - [ ] **Step 3: Confirm no unintended workflows fired**
 
-Assert no `Docker`/`Release` workflow runs were triggered by the branch push, and that the diff contains only `.github/workflows/ci.yml`, `.gitignore`, and `README.md`.
+Assert no `Docker`/`Release` workflow runs were triggered by the branch push (both trigger on `main` pushes / `Release` completion only, so a branch push is safe), and that the diff against `origin/main` contains exactly four files: `.github/workflows/ci.yml`, `.gitignore`, `README.md`, and `docs/superpowers/plans/2026-11-13-code-coverage-metrics.md` (the implementation plan, committed per the repo's `docs/superpowers/plans/` convention). No unrelated account-pool commits.
 
 ---
 
