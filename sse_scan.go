@@ -26,12 +26,12 @@ func scanChunkData(data string) (sseChunkScan, bool) {
 	p := chunkScanner{s: data}
 	var out sseChunkScan
 	ok := p.object(func(key string) bool {
-		switch key {
-		case "id":
+		switch {
+		case key == "id" || strings.EqualFold(key, "id"):
 			return p.text(&out.id)
-		case "model":
+		case key == "model" || strings.EqualFold(key, "model"):
 			return p.text(&out.model)
-		case "choices":
+		case key == "choices" || strings.EqualFold(key, "choices"):
 			out.choices = nil
 			if p.null() {
 				return true
@@ -39,8 +39,8 @@ func scanChunkData(data string) (sseChunkScan, bool) {
 			return p.array(func() bool {
 				ch := sseChoiceScan{emptyFRSpan: [2]int{-1, -1}}
 				if !p.null() && !p.object(func(key string) bool {
-					switch key {
-					case "index":
+					switch {
+					case key == "index" || strings.EqualFold(key, "index"):
 						if p.null() {
 							return true
 						}
@@ -51,7 +51,7 @@ func scanChunkData(data string) (sseChunkScan, bool) {
 						n, err := strconv.Atoi(p.s[start:p.i])
 						ch.index = n
 						return err == nil
-					case "finish_reason":
+					case key == "finish_reason" || strings.EqualFold(key, "finish_reason"):
 						ch.finish = ""
 						ch.emptyFRSpan = [2]int{-1, -1}
 						start := p.i
