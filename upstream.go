@@ -434,29 +434,3 @@ func newHTTPResponse(orig *http.Response, body []byte) *http.Response {
 	clone.Body = io.NopCloser(bytes.NewReader(body))
 	return &clone
 }
-
-func copySSE(dst http.ResponseWriter, src *http.Response) {
-	dst.Header().Set("Content-Type", "text/event-stream")
-	dst.Header().Set("Cache-Control", "no-cache")
-	dst.Header().Set("Connection", "keep-alive")
-	flusher, _ := dst.(http.Flusher)
-	buf := make([]byte, 32*1024)
-	for {
-		n, err := src.Body.Read(buf)
-		if n > 0 {
-			dst.Write(buf[:n])
-			if flusher != nil {
-				flusher.Flush()
-			}
-		}
-		if err != nil {
-			return
-		}
-	}
-}
-
-func copyBody(w http.ResponseWriter, resp *http.Response, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	io.Copy(w, resp.Body)
-}
