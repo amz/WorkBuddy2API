@@ -21,7 +21,41 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: go test -count=1 ./...
+        shell: bash
+        run: go test -count=1 -covermode=atomic -coverprofile=coverage.out ./...
+
+      - name: Coverage summary
+        shell: bash
+        run: |
+          total=$(go tool cover -func=coverage.out | tail -1)
+          echo "Coverage: $total"
+          summary="$GITHUB_STEP_SUMMARY"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            command -v cygpath >/dev/null 2>&1 || { echo "cygpath is required on Windows runners" >&2; exit 1; }
+            summary=$(cygpath -u "$summary")
+          fi
+          {
+            echo "## Code coverage"
+            echo ""
+            echo '```'
+            go tool cover -func=coverage.out
+            echo '```'
+            echo ""
+            echo "**$total**"
+          } >> "$summary"
+
+      - name: Generate HTML coverage report
+        shell: bash
+        run: go tool cover -html=coverage.out -o coverage.html
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-report
+          path: |
+            coverage.out
+            coverage.html
+          if-no-files-found: error
 
       - name: Build
         run: go build -o WorkBuddy2API.exe .
