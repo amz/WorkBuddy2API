@@ -4,8 +4,8 @@
 
 **OpenAI-compatible proxy for WorkBuddy AI — run WorkBuddy's models through any OpenAI client, without the desktop app open.**
 
-[![CI](https://github.com/ErfanBagheri404/WorkBuddy2API/actions/workflows/ci.yml/badge.svg)](https://github.com/ErfanBagheri404/WorkBuddy2API/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/ErfanBagheri404/WorkBuddy2API?color=blue)](https://github.com/ErfanBagheri404/WorkBuddy2API/releases/latest)
+[![CI](https://github.com/amz/WorkBuddy2API/actions/workflows/ci.yml/badge.svg)](https://github.com/amz/WorkBuddy2API/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/amz/WorkBuddy2API?color=blue)](https://github.com/amz/WorkBuddy2API/releases/latest)
 [![Go](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
@@ -31,7 +31,7 @@ The desktop app does **not** need to be running.
 
 ## Quick start
 
-1. Download `WorkBuddy2API.exe` from the [latest release](https://github.com/ErfanBagheri404/WorkBuddy2API/releases/latest).
+1. Download `WorkBuddy2API.exe` from the [latest release](https://github.com/amz/WorkBuddy2API/releases/latest).
 2. Run it. On first launch it opens your browser to sign in to WorkBuddy.
 3. Pick **Start server** from the menu.
 
@@ -195,7 +195,7 @@ The version is derived from the latest `vX.Y.Z` tag — the repository holds no 
 ## Building from source
 
 ```bash
-git clone https://github.com/ErfanBagheri404/WorkBuddy2API.git
+git clone https://github.com/amz/WorkBuddy2API.git
 cd WorkBuddy2API
 go build -ldflags "-X main.Version=v0.1.0" -o WorkBuddy2API.exe .
 ```
