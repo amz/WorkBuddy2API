@@ -235,22 +235,24 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Validation reads the already-decoded map; the body is decoded once.
+	// Match the old struct decoder: reject wrong types before required-field
+	// checks, but accept JSON null as the corresponding zero value.
+	_, modelOK := payload["model"].(string)
+	msgs, messagesOK := payload["messages"].([]any)
+	_, streamOK := payload["stream"].(bool)
+	if (payload["model"] != nil && !modelOK) ||
+		(payload["messages"] != nil && !messagesOK) ||
+		(payload["stream"] != nil && !streamOK) {
+		writeError(w, http.StatusBadRequest, "request body must be valid JSON", "invalid_request_error")
+		return
+	}
 	if m, _ := payload["model"].(string); strings.TrimSpace(m) == "" {
 		writeError(w, http.StatusBadRequest, "model is required", "invalid_request_error")
 		return
 	}
-	msgs, _ := payload["messages"].([]any)
 	if len(msgs) == 0 {
 		writeError(w, http.StatusBadRequest, "messages must not be empty", "invalid_request_error")
 		return
-	}
-	// A wrong-typed stream must still 400 the way the old struct decode did:
-	// map decoding alone would silently ignore the type error.
-	if v, ok := payload["stream"]; ok {
-		if _, isBool := v.(bool); !isBool {
-			writeError(w, http.StatusBadRequest, "request body must be valid JSON", "invalid_request_error")
-			return
-		}
 	}
 	// WorkBuddy only supports streaming. Always request stream from upstream.
 	// When the client wants non-streaming, buffer the SSE chunks and return
