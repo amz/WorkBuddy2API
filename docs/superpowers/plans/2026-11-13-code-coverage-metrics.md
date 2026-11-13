@@ -73,10 +73,13 @@ Change the `Test` step's `run:` from `go test -count=1 ./...` to:
 
 ```yaml
       - name: Test
+        shell: bash
         run: go test -count=1 -covermode=atomic -coverprofile=coverage.out ./...
 ```
 
-Rationale: `-count=1` keeps the existing no-cache behavior; `-covermode=atomic` is correct for the concurrent SSE/streaming code; `-coverprofile` writes the profile the later steps consume. No `shell:` needed — the command is pure `go`, identical in PowerShell and bash.
+Rationale: `-count=1` keeps the existing no-cache behavior; `-covermode=atomic` is correct for the concurrent SSE/streaming code; `-coverprofile` writes the profile the later steps consume.
+
+**Windows PowerShell tokenization (found in CI during implementation):** with the default `pwsh` shell, `-coverprofile=coverage.out` is split so `go` receives a stray `.out` package argument (`# .out / no required module provides package .out`), failing the Test step even though coverage is measured. The same applies to `-html=coverage.out` in Task 3. `shell: bash` on both `go` steps is the root-cause fix — a single, consistent shell for every coverage command, matching the `Coverage summary` step. Do not "fix" this by quoting individual flags.
 
 - [ ] **Step 2: Verify locally in the Go container**
 
@@ -174,6 +177,7 @@ Insert this step immediately before the upload step (self-contained: it does not
 
 ```yaml
       - name: Generate HTML coverage report
+        shell: bash
         run: go tool cover -html=coverage.out -o coverage.html
 ```
 
