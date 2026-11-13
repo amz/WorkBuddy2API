@@ -22,7 +22,7 @@ const (
 	sseDone         = "data: [DONE]\n\n"
 )
 
-func runCopySSELogged(t *testing.T, upstream string) string {
+func runCopySSELoggedRec(t *testing.T, upstream string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	src := &http.Response{
@@ -33,7 +33,11 @@ func runCopySSELogged(t *testing.T, upstream string) string {
 	}
 	rec := httptest.NewRecorder()
 	copySSELogged(rec, src, "cid-1", "hy4free", time.Now())
-	return rec.Body.String()
+	return rec
+}
+
+func runCopySSELogged(t *testing.T, upstream string) string {
+	return runCopySSELoggedRec(t, upstream).Body.String()
 }
 
 // parseSSELines decodes every data: line the proxy emitted. It fails on lines
@@ -322,5 +326,85 @@ func TestCopySSELogged_NoRequestStillTerminates(t *testing.T) {
 	_, doneCount := parseSSELines(t, rec.Body.String())
 	if doneCount != 1 {
 		t.Fatalf("want one [DONE] without a request context, got %d", doneCount)
+	}
+}
+
+// The SSE copier must never HTML-escape upstream payloads: these are JSON/SSE
+// API responses, not HTML. Go's json.Marshal escapes < as \u003c, which is
+// still valid JSON — decoding the line must yield the original content.
+func TestCopySSELogged_ContentTypeAndRawPayloadPreserved(t *testing.T) {
+	raw := `<script>alert(1)</script>`
+	upstream := `data: {"id":"c1","object":"chat.completion.chunk","model":"hy4-free","choices":[{"index":0,"delta":{"content":"` + raw + `"},"finish_reason":""}]}` + "\n\n" + sseDone
+	rec := runCopySSELoggedRec(t, upstream)
+
+	if got := rec.Header().Get("Content-Type"); got != "text/event-stream" {
+		t.Errorf("Content-Type = %q, want text/event-stream", got)
+	}
+	chunks, doneCount := parseSSELines(t, rec.Body.String())
+	if doneCount != 1 {
+		t.Errorf("want one [DONE], got %d", doneCount)
+	}
+	found := false
+	for _, chunk := range chunks {
+		choices, _ := chunk["choices"].([]any)
+		for _, c := range choices {
+			choice, _ := c.(map[string]any)
+			delta, _ := choice["delta"].(map[string]any)
+			if content, _ := delta["content"].(string); content == raw {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Errorf("decoded SSE payload lost raw content %q; output:\n%s", raw, rec.Body.String())
+	}
+}
+
+// Drive a real streaming chat request through Server.Handler() so the
+// middleware chain is exercised, and assert the nosniff header survives on
+// an SSE response. copySSELogged sets Content-Type itself, but
+// X-Content-Type-Options is set by the outermost noSniff middleware — a unit
+// test calling copySSELogged directly cannot observe that.
+func TestHandleChat_StreamSetsNosniffHeader(t *testing.T) {
+	t.Setenv(probeEnv, "0") // no background probe goroutine may outlive this test
+
+	raw := `<script>alert(1)</script>`
+	upstream := `data: {"id":"c1","object":"chat.completion.chunk","model":"hy4-free","choices":[{"index":0,"delta":{"content":"` + raw + `"},"finish_reason":""}]}` + "\n\n" + sseDone
+	am := fakeAuth("acct-a", &scriptedTransport{status: 200, body: upstream})
+	p := poolOf(am)
+	forceStart(p, 0)
+	srv := NewServer(NewUpstreamClientPool(p), am, "", false, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
+		strings.NewReader(`{"model":"m","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "text/event-stream" {
+		t.Errorf("Content-Type = %q, want text/event-stream", got)
+	}
+	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
+	}
+	chunks, doneCount := parseSSELines(t, rec.Body.String())
+	if doneCount != 1 {
+		t.Errorf("want one [DONE], got %d", doneCount)
+	}
+	found := false
+	for _, chunk := range chunks {
+		choices, _ := chunk["choices"].([]any)
+		for _, c := range choices {
+			choice, _ := c.(map[string]any)
+			delta, _ := choice["delta"].(map[string]any)
+			if content, _ := delta["content"].(string); content == raw {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Errorf("decoded SSE payload lost raw content %q; output:\n%s", raw, rec.Body.String())
 	}
 }
